@@ -7,7 +7,8 @@ set -e
 REGISTRY_NAME="gnosis-metadata-registry"
 IMAGE_NAME="gnosis/metadata"
 INSTANCE_ID="i-034fedd3525c9973d"
-INSTANCE_PUBLIC_IP="54.87.73.85"
+INSTANCE_PUBLIC_IP=$(cat ../secrets.json | jq -r '.["gnosis-metadata"].METADATA_API_URL' | cut -d'/' -f3 | cut -d':' -f1)
+echo "using $INSTANCE_PUBLIC_IP"
 AWS_REGION="us-east-1"
 KEY_PATH="/Users/chim/Working/cloud/Gnosis/gnosis.pem"
 EC2_USER="ec2-user"
@@ -41,7 +42,7 @@ echo "✨ Build and push complete!"
 
 # SSH into the EC2 instance and execute commands
 echo "🚀 Starting deployment process on EC2 instance..."
-ssh -i "$KEY_PATH" "$EC2_USER@$INSTANCE_PUBLIC_IP" << EOF
+ssh -o StrictHostKeyChecking=no -i "$KEY_PATH" "$EC2_USER@$INSTANCE_PUBLIC_IP" << EOF
     # Get the current container ID if it exists
     CONTAINER_ID=\$(docker ps -q --filter ancestor=$ECR_REGISTRY_URI:latest)
 

@@ -16,6 +16,8 @@ CORS(app)
 
 secrets = get_service_secrets('gnosis-metadata')
 
+API_KEY = secrets.get('API_KEY')
+
 C_PORT = int(secrets.get('PORT', 5000))
 SQLALCHEMY_DATABASE_URI = (
     f"mysql+pymysql://{secrets['MYSQL_USER']}:{secrets['MYSQL_PASSWORD_CONTENT']}"
@@ -160,6 +162,24 @@ def get_content_metadata(content_id):
     except Exception as e:
         logging.error(f"Error in get_content_metadata: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
+
+# add middleware
+@app.before_request
+def log_request_info():
+    logging.info(f"Headers: {request.headers}")
+    logging.info(f"Body: {request.get_data()}")
+
+    # for now just check that it has a Authorization header
+    if 'X-API-KEY' not in request.headers:
+        logging.warning("No X-API-KEY header")
+        return jsonify({'error': 'No X-API-KEY'}), 401
+    
+    x_api_key = request.headers.get('X-API-KEY')
+    if x_api_key != API_KEY:
+        logging.warning("Invalid X-API-KEY")
+        return jsonify({'error': 'Invalid X-API-KEY'}), 401
+    else:
+        return
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=C_PORT)
