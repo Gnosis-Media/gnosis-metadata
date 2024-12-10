@@ -1,11 +1,13 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
+from flask_restx import Api, Resource, fields
 from datetime import datetime
 from openai import OpenAI
 import logging
 import json
 from secrets_manager import get_service_secrets
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
                    format='%(asctime)s - %(levelname)s - %(message)s',
@@ -13,6 +15,17 @@ logging.basicConfig(level=logging.INFO,
 
 app = Flask(__name__)
 CORS(app)
+
+# Configure API
+api = Api(app,
+    version='1.0',
+    title='Gnosis Metadata API', 
+    description='API for extracting and managing content metadata',
+    doc='/docs'
+)
+
+# Configure namespace
+ns = api.namespace('api', description='Metadata operations')
 
 secrets = get_service_secrets('gnosis-metadata')
 
@@ -105,71 +118,97 @@ if only year or year-month is known, use YYYY-01-01 or YYYY-MM-01 format.
             "topic": "Unknown"
         }
 
-@app.route('/api/metadata/extract', methods=['POST'])
-def get_metadata():
-    """Extract metadata from provided text"""
-    if not request.json or 'text' not in request.json:
-        return jsonify({'error': 'No text provided'}), 400
-        
-    try:
-        text = request.json['text']
-        file_name = request.json.get('file_name')
-        additional_info = request.json.get('additional_info')
-        
-        metadata = extract_metadata_from_text(text, file_name, additional_info)
-        
-        return jsonify({
-            'message': 'Metadata extracted successfully',
-            'metadata': metadata
-        }), 200
-        
-    except Exception as e:
-        logging.error(f"Error in get_metadata: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
+# API Models
+metadata_request = api.model('MetadataRequest', {
+    'text': fields.String(required=True, description='Text to extract metadata from'),
+    'file_name': fields.String(description='Name of the file'),
+    'additional_info': fields.String(description='Additional context information')
+})
 
-@app.route('/api/content/<int:content_id>/metadata', methods=['GET'])
-def get_content_metadata(content_id):
-    """Get metadata for specific content ID"""
-    try:
-        content = Content.query.get(content_id)
-        
-        if not content:
-            return jsonify({'error': 'Content not found'}), 404
+metadata_response = api.model('MetadataResponse', {
+    'message': fields.String(description='Status message'),
+    'metadata': fields.Raw(description='Extracted metadata')
+})
+
+content_metadata_response = api.model('ContentMetadataResponse', {
+    'message': fields.String(description='Status message'),
+    'metadata': fields.Raw(description='Content metadata')
+})
+
+@ns.route('/metadata/extract')
+class MetadataExtractResource(Resource):
+    @api.doc('extract_metadata')
+    @api.expect(metadata_request)
+    @api.marshal_with(metadata_response)
+    def post(self):
+        """Extract metadata from provided text"""
+        if not request.json or 'text' not in request.json:
+            api.abort(400, 'No text provided')
             
-        metadata = {
-            'id': content.id,
-            'user_id': content.user_id,
-            'file_name': content.file_name,
-            'file_type': content.file_type,
-            'upload_date': content.upload_date.isoformat(),
-            'file_size': content.file_size,
-            's3_key': content.s3_key,
-            'chunk_count': content.chunk_count,
-            'title': content.title,
-            'author': content.author,
-            'publication_date': content.publication_date.isoformat() if content.publication_date else None,
-            'publisher': content.publisher,
-            'source_language': content.source_language,
-            'genre': content.genre,
-            'topic': content.topic
-        }
-        
-        return jsonify({
-            'message': 'Metadata retrieved successfully',
-            'metadata': metadata
-        }), 200
-        
-    except Exception as e:
-        logging.error(f"Error in get_content_metadata: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
+        try:
+            text = request.json['text']
+            file_name = request.json.get('file_name')
+            additional_info = request.json.get('additional_info')
+            
+            metadata = extract_metadata_from_text(text, file_name, additional_info)
+            
+            return {
+                'message': 'Metadata extracted successfully',
+                'metadata': metadata
+            }, 200
+            
+        except Exception as e:
+            logging.error(f"Error in get_metadata: {str(e)}")
+            api.abort(500, 'Internal server error')
 
-# add middleware
+@ns.route('/content/<int:content_id>/metadata')
+class ContentMetadataResource(Resource):
+    @api.doc('get_content_metadata')
+    @api.marshal_with(content_metadata_response)
+    def get(self, content_id):
+        """Get metadata for specific content ID"""
+        try:
+            content = Content.query.get(content_id)
+            
+            if not content:
+                api.abort(404, 'Content not found')
+                
+            metadata = {
+                'id': content.id,
+                'user_id': content.user_id,
+                'file_name': content.file_name,
+                'file_type': content.file_type,
+                'upload_date': content.upload_date.isoformat(),
+                'file_size': content.file_size,
+                's3_key': content.s3_key,
+                'chunk_count': content.chunk_count,
+                'title': content.title,
+                'author': content.author,
+                'publication_date': content.publication_date.isoformat() if content.publication_date else None,
+                'publisher': content.publisher,
+                'source_language': content.source_language,
+                'genre': content.genre,
+                'topic': content.topic
+            }
+            
+            return {
+                'message': 'Metadata retrieved successfully',
+                'metadata': metadata
+            }, 200
+            
+        except Exception as e:
+            logging.error(f"Error in get_content_metadata: {str(e)}")
+            api.abort(500, 'Internal server error')
+
 @app.before_request
 def log_request_info():
+    # Exempt the /docs endpoint from logging and API key checks
+    if request.path.startswith('/docs') or request.path.startswith('/swagger'):
+        return
+
     logging.info(f"Headers: {request.headers}")
     logging.info(f"Body: {request.get_data()}")
 
-    # for now just check that it has a Authorization header
     if 'X-API-KEY' not in request.headers:
         logging.warning("No X-API-KEY header")
         return jsonify({'error': 'No X-API-KEY'}), 401

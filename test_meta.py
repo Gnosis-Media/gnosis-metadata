@@ -11,8 +11,8 @@ logging.basicConfig(
 )
 
 # Configuration
-METADATA_SERVICE_URL = 'http://3.85.142.23:80'
-
+# METADATA_SERVICE_URL = 'http://3.85.142.23:80'
+METADATA_SERVICE_URL = "http://localhost:5000"
 def test_metadata_extraction():
     """Test metadata extraction with various text samples"""
     
